@@ -1,0 +1,111 @@
+name: Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+    build-installer:
+        runs-on: windows-latest
+        steps:
+          - name: Checkout sources
+            uses: actions/checkout@v4
+
+          - name: Install MSKLC
+            id: install_msklc
+            shell: pwsh
+            run: |
+                choco install -y keyboard-layout-creator
+                $tool = "${env:ProgramFiles(x86)}/Microsoft Keyboard Layout Creator 1.4/MSKLC.exe"
+                if (Test-Path -Path $tool -PathType Leaf) {
+                    Write-Output "MSKLC.exe found at $tool"
+                    echo "tool=$tool" >> $env:GITHUB_OUTPUT
+                } else {
+                    Write-Error "MSKLC.exe not found at $tool."
+                    exit 1
+                }   
+
+          - name: Install 7zip
+            id: install_7zip
+            shell: pwsh
+            run: |
+                choco install -y 7zip.install
+                $tool = "${env:ProgramFiles}/7-Zip/7z.exe"
+                if (Test-Path -Path $tool -PathType Leaf) {
+                    Write-Output "7z.exe found at $tool"
+                    echo "tool=$tool" >> $env:GITHUB_OUTPUT
+                } else {
+                    Write-Error "7z.exe not found at $tool."
+                    exit 1
+                }   
+
+          - name: Install 7zip SFX modules
+            id: install_modules
+            shell: pwsh
+            run: |
+                iwr https://7-zip.org/a/lzma2501.7z -OutFile lzma2501.7z
+                & "${{ steps.install_7zip.outputs.tool }}" x lzma2501.7z -o7z_modules
+                $tool = "7z_modules/bin/7zSD.sfx"
+                if (Test-Path -Path $tool -PathType Leaf) {
+                    Write-Output "7zSD.sfx found at $tool"
+                    echo "tool=$tool" >> $env:GITHUB_OUTPUT
+                } else {
+                    Write-Error "7zSD.sfx not found at $tool."
+                    exit 1
+                }   
+
+          - name: Get Version Suffix
+            id: ver
+            shell: pwsh
+            run: |
+                $ver = $env:GITHUB_REF_NAME
+                if ($env:GITHUB_REF_TYPE -eq "branch") {
+                    $ver = "${env:GITHUB_REF_NAME}_${env:GITHUB_SHA}"
+                }
+                Write-Output "ver = $ver"
+                echo "ver=$ver" >> $env:GITHUB_OUTPUT
+
+          - name: Build installers
+            shell: pwsh
+            run: |
+                $klcFiles = Get-ChildItem -Path . -Filter "*.klc" -File
+
+                if ($klcFiles.Count -eq 0) {
+                    Write-Error "No .klc files found"
+                    exit 1
+                }
+
+                New-Item -ItemType Directory -Force -Path "Layouts" | Out-Null
+
+                $outMSKLC = [Environment]::GetFolderPath("MyDocuments")
+                Write-Output "Output expected at $outMSKLC"
+
+                foreach ($file in $klcFiles) {
+                    $layoutName = ((Get-Content -Path "$file" -TotalCount 1) -split '\s+')[1]
+                    Start-Process -FilePath "${{ steps.install_msklc.outputs.tool }}" -ArgumentList "$file", "/build"  -Wait
+                    Copy-Item -Path "$outMSKLC/$layoutName" -Destination "Layouts" -Recurse
+                }
+
+          - name: Pack installers
+            shell: pwsh
+            run: |
+                $layouts = (Get-ChildItem -Path Layouts -Directory).Name
+
+                if ($layouts.Count -eq 0) {
+                    Write-Error "No layouts to pack"
+                    exit 1
+                }
+
+                foreach ($layout in $layouts) {
+                    & "${{ steps.install_7zip.outputs.tool }}" a -t7z "$layout.7z" "Layouts/$layout/*" 
+                    Get-Content "${{ steps.install_modules.outputs.tool }}",sfx.config,"$layout.7z" -AsByteStream -ReadCount 0 |
+                        Set-Content "$layout-${{ steps.ver.outputs.ver }}.exe" -AsByteStream
+                }
+
+
+          - name: Result upload
+            uses: actions/upload-artifact@v4
+            with:
+              name: packages
+              path: |
+                  *.exe
+              if-no-files-found: error

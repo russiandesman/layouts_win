@@ -96,7 +96,7 @@ jobs:
                 }
 
                 foreach ($layout in $layouts) {
-                    & "${{ steps.install_7zip.outputs.tool }}" a -t7z "$layout.7z" "Layouts/$layout/*" 
+                    & "${{ steps.install_7zip.outputs.tool }}" a -t7z "$layout.7z" "./Layouts/$layout/*" 
                     Get-Content "${{ steps.install_modules.outputs.tool }}",sfx.config,"$layout.7z" -AsByteStream -ReadCount 0 |
                         Set-Content "$layout-${{ steps.ver.outputs.ver }}.exe" -AsByteStream
                 }

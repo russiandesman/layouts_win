@@ -2,6 +2,12 @@ name: Build
 
 on:
   workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
 
 jobs:
     build-installer:
@@ -101,11 +107,19 @@ jobs:
                         Set-Content "$layout-${{ steps.ver.outputs.ver }}.exe" -AsByteStream
                 }
 
-
-          - name: Result upload
+          - name: Upload artifacts
+            if: github.ref_type != 'tag'
             uses: actions/upload-artifact@v4
             with:
               name: packages
               path: |
-                  *.exe
+                *.exe
               if-no-files-found: error
+
+          - name: Publish release
+            if: github.ref_type == 'tag'
+            uses: softprops/action-gh-release@v2
+            with:
+              files: |
+                *.exe
+              generate_release_notes: true
